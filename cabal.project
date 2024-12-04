@@ -1,0 +1,4 @@
+packages:
+  FloPoCoFloat.cabal
+
+write-ghc-environment-files: always
