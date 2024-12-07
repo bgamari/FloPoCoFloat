@@ -155,8 +155,9 @@ type Sign = #type mpfr_sign_t
 
 type CPrecision = #type mpfr_prec_t
 
-type Exp = #type mp_exp_t
+--type Exp = #type mp_exp_t
 
+type Exp = CLong
 type MpSize = #type mp_size_t
 
 -- utility functions from chsmpfr.h
