@@ -153,8 +153,8 @@ type Limb = #type mp_limb_t
 
 type Sign = #type mpfr_sign_t
 
-type CPrecision = #type mpfr_prec_t
-
+--type CPrecision = #type mpfr_prec_t
+type CPrecision = CInt
 --type Exp = #type mp_exp_t
 
 type Exp = CLong

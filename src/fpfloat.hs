@@ -19,6 +19,7 @@ import Data.Maybe (fromMaybe)
 import System.IO (hFlush, stdout)
 import Debug.Trace (trace)
 import Data.Ratio
+import Data.Proxy
 
 
 
@@ -59,6 +60,7 @@ data FoFloat =
                 , frac:: Integer
                 }
     deriving (Typeable, Generic, Show)
+
 
 eqRoundMode :: M.RoundMode -> M.RoundMode -> Bool
 eqRoundMode M.Near       M.Near       = True
@@ -324,16 +326,16 @@ convertMPFRtoFoFloat num wEVal wFVal = do
         
         
 
-getPrecision::FoFloat -> Int
-getPrecision fofloat = (wE fofloat) + (wF fofloat)
+getPrecision::FoFloat -> M.Precision
+getPrecision fofloat = fromIntegral (wE fofloat) + fromIntegral (wF fofloat)
 
-maxPrecision::FoFloat -> FoFloat -> Int
+maxPrecision::FoFloat -> FoFloat -> M.Precision
 maxPrecision fo1 fo2 = do
     let a = getPrecision fo1 
     let b =  getPrecision fo2
     P.max a b
 
-minPrecision::FoFloat -> FoFloat -> Int
+minPrecision::FoFloat -> FoFloat -> M.Precision
 minPrecision fo1 fo2 = do
     let a = getPrecision fo1 
     let b =  getPrecision fo2
@@ -344,14 +346,14 @@ minPrecision fo1 fo2 = do
 
 getwEwFfromMaxPrec:: FoFloat -> FoFloat -> (Int, Int)
 getwEwFfromMaxPrec fo1 fo2 = do
-    if(fo1 == maxPrecision fo1 fo2) then
+    if(getPrecision fo1 == maxPrecision fo1 fo2) then
         (wE fo1, wF fo1)
     else
         (wE fo2, wF fo2)
 
 getwEwFfromMinPrec:: FoFloat -> FoFloat -> (Int, Int)
 getwEwFfromMinPrec fo1 fo2 = do
-    if(fo1 == minPrecision fo1 fo2) then
+    if(getPrecision fo1 == minPrecision fo1 fo2) then
         (wE fo1, wF fo1)
     else
         (wE fo2, wF fo2)
@@ -379,12 +381,12 @@ instance Num FoFloat where
         convertMPFRtoFoFloat temp wEVal wFVal
     negate f1      = do
         let m1 = convertFoFloattoMPFR f1
-        let temp = M.neg (rndMode f1) (getPrecision m1) m1
+        let temp = M.neg (rndMode f1) (getPrecision f1) m1
         let (wEVal, wFVal) =(wE f1, wF f1) 
         convertMPFRtoFoFloat temp wEVal wFVal
     abs f1         = do
         let m1 = convertFoFloattoMPFR f1
-        let temp = M.absD (rndMode f1) (getPrecision m1) m1
+        let temp = M.absD (rndMode f1) (getPrecision f1) m1
         let (wEVal, wFVal) =(wE f1, wF f1) 
         convertMPFRtoFoFloat temp wEVal wFVal
     signum f1     = 
@@ -408,10 +410,46 @@ instance Num FoFloat where
 decomposeFoFloat::FoFloat -> (Integer, Integer)
 decomposeFoFloat fofloat = (fractionalVal fofloat, (exponentVal fofloat) - (DBits.shiftL 1 (fromIntegral (wE fofloat) - 1)) + 1)
 
+cmpFoFloat :: FoFloat -> FoFloat -> P.Ordering
+cmpFoFloat fo1 fo2 = do
+    let m1 = convertFoFloattoMPFR fo1 
+    let m2 = convertFoFloattoMPFR fo2 
+    P.compare m1 m2 
+
+lessFoFloat :: FoFloat -> FoFloat -> P.Bool
+lessFoFloat fo1 fo2 = do 
+    let m1 = convertFoFloattoMPFR fo1 
+    let m2 = convertFoFloattoMPFR fo2 
+    M.less m1 m2
+lesseqFoFloat :: FoFloat -> FoFloat -> P.Bool
+lesseqFoFloat fo1 fo2 = do 
+    let m1 = convertFoFloattoMPFR fo1 
+    let m2 = convertFoFloattoMPFR fo2 
+    M.lesseq m1 m2
+greaterFoFloat :: FoFloat -> FoFloat -> P.Bool
+greaterFoFloat fo1 fo2 = do 
+    let m1 = convertFoFloattoMPFR fo1 
+    let m2 = convertFoFloattoMPFR fo2 
+    M.greater m1 m2
+greatereqFoFloat :: FoFloat -> FoFloat -> P.Bool
+greatereqFoFloat fo1 fo2 = do 
+    let m1 = convertFoFloattoMPFR fo1 
+    let m2 = convertFoFloattoMPFR fo2 
+    M.greatereq m1 m2
+
+
+
+instance Ord FoFloat where
+    compare :: FoFloat -> FoFloat -> Ordering
+    compare d = cmpFoFloat d
+    (<)       = lessFoFloat
+    (<=)      = lesseqFoFloat
+    (>)       = greaterFoFloat
+    (>=)      = greatereqFoFloat
 instance Real FoFloat where
-    toRational d = n % 2 ^ e
+    toRational d = n % (2  P.^ e)
         where (n', e') = decomposeFoFloat d
-              (n, e) = if e' >= 0 then ((n' * 2 ^ e'), 0)
+              (n, e) = if e' >= 0 then ((n' * (2 P.^ e')), 0)
                          else (n', - e')
 
 instance Fractional FoFloat where
@@ -422,55 +460,70 @@ instance Fractional FoFloat where
         let (wEVal, wFVal) = getwEwFfromMaxPrec f1 f2 
         convertMPFRtoFoFloat temp wEVal wFVal 
     fromRational r = do
-        let n = M.fromIntegerA M.Near 23 (P.fromInteger numerator r)
-        let d = M.fromIntegerA M.Near 23 (P.fromInteger denominator r)
+        let n = M.fromIntegerA M.Near 23 (P.fromInteger (numerator r))
+        let d = M.fromIntegerA M.Near 23 (P.fromInteger (denominator r))
         let temp = M.div M.Near 23 n d
         convertMPFRtoFoFloat temp 8 23
     recip d        = do
-        let oneFoFloat = M.fromInt M.Near 23 1
-        let temp = M.div M.Near 
+        let one = M.fromWord M.Near 23 1
+        let denom = convertFoFloattoMPFR d 
+        let temp = M.div (rndMode d) (getPrecision d) one denom 
+        convertMPFRtoFoFloat temp (wE d) (wF d)
+
+
 
 instance Floating FoFloat where
-    pi           = S.pi Zero 53
-    exp d        = S.exp Zero (getPrec d) d
-    log d        = S.log Zero (getPrec d) d
-    sqrt d       = A.sqrt Zero (getPrec d) d
-    (**) d d'    = A.pow Zero (maxPrec d d') d d'
-    logBase d d' = Prelude.log d' / Prelude.log d
-    sin d        = S.sin Zero (getPrec d) d
-    cos d        = S.cos Zero (getPrec d) d
-    tan d        = S.tan Zero (getPrec d) d
-    asin d       = S.asin Zero (getPrec d) d
-    acos d       = S.acos Zero (getPrec d) d
-    atan d       = S.atan Zero (getPrec d) d
-    sinh d       = S.sinh Zero (getPrec d) d
-    cosh d       = S.cosh Zero (getPrec d) d
-    tanh d       = S.tanh Zero (getPrec d) d
-    asinh d      = S.asinh Zero (getPrec d) d
-    acosh d      = S.acosh Zero (getPrec d) d
-    atanh d      = S.atanh Zero (getPrec d) d
+    pi           =convertMPFRtoFoFloat (M.pi M.Near 23) 8 23
+    exp d        = do 
+        let temp = convertFoFloattoMPFR d 
+        let tempres = M.exp (rndMode d) (getPrecision d) temp 
+        convertMPFRtoFoFloat tempres (wE d) (wF d) 
+    log d        = do 
+        let temp = convertFoFloattoMPFR d 
+        let tempres = M.log M.Down (getPrecision d) temp 
+        let res = convertMPFRtoFoFloat tempres (wE d) (wF d) 
+        let tempres1 = M.log M.Up (getPrecision d) temp 
+        let res1  = convertMPFRtoFoFloat tempres1 (wE d) (wF d) 
+        res 
+    sqrt d       = do 
+        let temp = convertFoFloattoMPFR d 
+        let tempres = M.sqrt (rndMode d) (getPrecision d) temp 
+        convertMPFRtoFoFloat tempres (wE d) (wF d)
+    (**) f1 f2    = do 
+        let temp = convertFoFloattoMPFR f1 
+        let temp1 = convertFoFloattoMPFR f2
+        let tempres = M.pow (rndMode f1) (maxPrecision f1 f2) temp temp1
+        convertMPFRtoFoFloat tempres (wE f1) (wF f2)
+    logBase d d' = error "logBase is not defined for FoFloat"
+    sin d        = error "sin is not defined for FoFloat"
+    cos d        = error "cos is not defined for FoFloat"
+    tan d        = error "tan is not defined for FoFloat"
+    asin d       = error "asin is not defined for FoFloat"
+    acos d       = error "acos is not defined for FoFloat"
+    atan d       = error "atan is not defined for FoFloat"
+    sinh d       = error "sinh is not defined for FoFloat"
+    cosh d       = error "cosh is not defined for FoFloat"
+    tanh d       = error "tanh is not defined for FoFloat"
+    asinh d      = error "asinh is not defined for FoFloat"
+    acosh d      = error "acosh is not defined for FoFloat"
+    atanh d      = error "atanh is not defined for FoFloat"
 
 instance RealFrac FoFloat where
-    properFraction d = (fromIntegral n, f)
-        where r = toRational d
-              m = numerator r
-              e = denominator r
-              n = quot m e
-              f = frac Zero (getPrec d) d
+    properFraction d = error "properFraction is not defined for FoFloat"
 
-instance RealFloat FoFloat where
+instance  RealFloat FoFloat where
     floatRadix _ = 2
-    floatDigits = fromInteger . toInteger . getPrec
-    floatRange _ = error "floatRange is not defined for MPFR numbers"
+    floatDigits = fromInteger . toInteger . getPrecision
+    floatRange _ = error "floatRange is not defined for FoFloat numbers"
     decodeFloat x = (d,e)
       where
-      (d,eE) = decompose x
+      (d,eE) = decomposeFoFloat x
       e = fromInteger (toInteger eE)
     encodeFloat d e = error "encodeFloat function is not defined for FoFloat"
       
-    isNaN (MP _ _ e _) = (e == expNaN)
-    isInfinite (MP _ _ e _) = (e == expInf)
+    isNaN fo = if (ext fo) == 11 then P.True else P.False
+    isInfinite fo = if (ext fo) == 10 then P.True else P.False
     isDenormalized _ = False
-    isNegativeZero d@(MP _ _ e _) = (e == expZero && signbit d)
+    isNegativeZero fo = if (ext fo) == 00 && (sign fo) == 1 then P.True else P.False
     isIEEE _ = False
-    atan2 d1 d2 = S.atan2 Near (maxPrec d1 d2) d1 d2
+    atan2 d1 d2 = error "atan2 is not defined for FoFloat" 
