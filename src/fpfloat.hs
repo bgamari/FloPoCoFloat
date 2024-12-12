@@ -20,7 +20,7 @@ import System.IO (hFlush, stdout)
 import Debug.Trace (trace)
 import Data.Ratio
 import Data.Proxy
-
+import Data.Data  (Data)
 
 
 {-
@@ -49,19 +49,30 @@ data FoFloat =
               , wE :: Int
               , wF :: Int
               , rndMode :: M.RoundMode
-              , exponentVal:: Integer
-              , fractionalVal::Integer
+              , exponentVal:: Unsigned 64
+              , fractionalVal::Unsigned 64
               }
-    | IEEEFloat { sign :: Bit
-                , wE :: Int
-                , wF :: Int
-                , rndMode :: M.RoundMode
-                , exp:: Integer
-                , frac:: Integer
+    deriving (Typeable, Generic, Show)
+data IEEEFloat = IEEEFloat { signI :: Bit
+                , wEI :: Int
+                , wFI:: Int
+                , rndModeI :: M.RoundMode
+                , expI:: Integer
+                , fracI:: Integer
                 }
     deriving (Typeable, Generic, Show)
 
+{-
 
+  (IEEEFloat sign1 wE1 wF1 rndMode1 exp1 frac1) ==
+    (IEEEFloat sign2 wE2 wF2 rndMode2 exp2 frac2) =
+      sign1 == sign2 &&
+      wE1 == wE2 &&
+      wF1 == wF2 &&
+      eqRoundMode rndMode1 rndMode2 && -- Use custom equality
+      exp1 == exp2 &&
+      frac1 == frac2
+-}
 eqRoundMode :: M.RoundMode -> M.RoundMode -> Bool
 eqRoundMode M.Near       M.Near       = True
 eqRoundMode M.Zero       M.Zero       = True
@@ -73,15 +84,6 @@ instance Eq FoFloat where
   (FoFloat ext1 sign1 wE1 wF1 rndMode1 exp1 frac1) ==
     (FoFloat ext2 sign2 wE2 wF2 rndMode2 exp2 frac2) =
       ext1 == ext2 &&
-      sign1 == sign2 &&
-      wE1 == wE2 &&
-      wF1 == wF2 &&
-      eqRoundMode rndMode1 rndMode2 && -- Use custom equality
-      exp1 == exp2 &&
-      frac1 == frac2
-
-  (IEEEFloat sign1 wE1 wF1 rndMode1 exp1 frac1) ==
-    (IEEEFloat sign2 wE2 wF2 rndMode2 exp2 frac2) =
       sign1 == sign2 &&
       wE1 == wE2 &&
       wF1 == wF2 &&
@@ -174,7 +176,7 @@ convertFoFloattoMPFR fofloat = do
             let precVal = 2 + fromIntegral wFVal
             --print $ "Precision Value: "
             --print $ show precVal
-            let frac_mpfr = M.fromIntegerA rndModeVal precVal fracVal
+            let frac_mpfr = M.fromIntegerA rndModeVal precVal (toInteger fracVal)
             --print $ "Fraction as MPFR: " 
             --print $ show frac_mpfr
             let temp = M.div2i rndModeVal precVal frac_mpfr wFVal -- (frac/2^(wF))
@@ -186,7 +188,7 @@ convertFoFloattoMPFR fofloat = do
             let unbiased_exp = expVal - (DBits.shiftL 1 (fromIntegral wEVal - 1)) + 1
             --print $ "Unbiased Exponent: " 
             --print $ show unbiased_exp
-            let mpfr_val = M.mul2i rndModeVal precVal temp1 (P.fromInteger unbiased_exp)
+            let mpfr_val = M.mul2i rndModeVal precVal temp1 (P.fromInteger (toInteger unbiased_exp))
             --print $ "MPFR Value: " 
             --print $ show mpfr_val
             if signVal == 1 then do
@@ -324,7 +326,7 @@ convertMPFRtoFoFloat num wEVal wFVal = do
                 FoFloat {ext = 01, sign = if (fromMaybe 0 (M.sgn num)) > 0 then 0 else 1, wE = wEVal, wF = wFVal, rndMode = rndVal, exponentVal = P.fromIntegral biasedExp, fractionalVal = P.fromIntegral tempfracVal}
         
         
-        
+convertto
 
 getPrecision::FoFloat -> M.Precision
 getPrecision fofloat = fromIntegral (wE fofloat) + fromIntegral (wF fofloat)
@@ -408,7 +410,7 @@ instance Num FoFloat where
 --     fromInteger i@(J# n _) = fromIntegerA Zero (fromIntegral . abs $ E.I# n * bitsPerIntegerLimb) i
 -- #endif
 decomposeFoFloat::FoFloat -> (Integer, Integer)
-decomposeFoFloat fofloat = (fractionalVal fofloat, (exponentVal fofloat) - (DBits.shiftL 1 (fromIntegral (wE fofloat) - 1)) + 1)
+decomposeFoFloat fofloat = (toInteger (fractionalVal fofloat),toInteger (exponentVal fofloat) - (DBits.shiftL 1 (fromIntegral (wE fofloat) - 1)) + 1)
 
 cmpFoFloat :: FoFloat -> FoFloat -> P.Ordering
 cmpFoFloat fo1 fo2 = do
@@ -441,7 +443,7 @@ greatereqFoFloat fo1 fo2 = do
 
 instance Ord FoFloat where
     compare :: FoFloat -> FoFloat -> Ordering
-    compare d = cmpFoFloat d
+    compare  = cmpFoFloat 
     (<)       = lessFoFloat
     (<=)      = lesseqFoFloat
     (>)       = greaterFoFloat
@@ -525,5 +527,5 @@ instance  RealFloat FoFloat where
     isInfinite fo = if (ext fo) == 10 then P.True else P.False
     isDenormalized _ = False
     isNegativeZero fo = if (ext fo) == 00 && (sign fo) == 1 then P.True else P.False
-    isIEEE _ = False
+    isIEEE _ = True
     atan2 d1 d2 = error "atan2 is not defined for FoFloat" 

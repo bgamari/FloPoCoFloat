@@ -1,4 +1,5 @@
 {-# LANGUAGE ForeignFunctionInterface, DeriveGeneric, DeriveDataTypeable, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DataKinds #-}
 #include <chsmpfr.h>
 #include <mpfr.h>
 
@@ -25,7 +26,7 @@ import GHC.Generics(Generic)
 import Data.Function(on)
 
 data RoundMode = Near | Zero | Up | Down | MPFR_RNDNA
-                 deriving (Show, Read)
+                 deriving (Typeable,Show, Read)
 
 instance Enum RoundMode where
 #if MPFR_VERSION_MAJOR == 2
