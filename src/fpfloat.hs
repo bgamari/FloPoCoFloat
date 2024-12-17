@@ -49,17 +49,16 @@ data FoFloat =
               , wE :: Int
               , wF :: Int
               , rndMode :: M.RoundMode
-              , exponentVal:: Integer
-              , fractionalVal::Integer
+              , exponentVal:: Unsigned 64
+              , fractionalVal::Unsigned 64
               }
-    | IEEEFloat { sign :: Bit
-                , wE :: Int
-                , wF :: Int
-                , rndMode :: M.RoundMode
-                , exp:: Integer
-                , frac:: Integer
-                }
-    deriving (Typeable, Generic, Show)
+
+class ShowMPFR a where
+    showMPFR::a -> P.String
+
+instance  ShowMPFR FoFloat where
+    showMPFR = P.show .convertFoFloattoMPFR
+
 
 
 eqRoundMode :: M.RoundMode -> M.RoundMode -> Bool
@@ -80,14 +79,7 @@ instance Eq FoFloat where
       exp1 == exp2 &&
       frac1 == frac2
 
-  (IEEEFloat sign1 wE1 wF1 rndMode1 exp1 frac1) ==
-    (IEEEFloat sign2 wE2 wF2 rndMode2 exp2 frac2) =
-      sign1 == sign2 &&
-      wE1 == wE2 &&
-      wF1 == wF2 &&
-      eqRoundMode rndMode1 rndMode2 && -- Use custom equality
-      exp1 == exp2 &&
-      frac1 == frac2
+  
 
   _ == _ = False
 
@@ -174,7 +166,7 @@ convertFoFloattoMPFR fofloat = do
             let precVal = 2 + fromIntegral wFVal
             --print $ "Precision Value: "
             --print $ show precVal
-            let frac_mpfr = M.fromIntegerA rndModeVal precVal fracVal
+            let frac_mpfr = M.fromIntegerA rndModeVal precVal (toInteger fracVal)
             --print $ "Fraction as MPFR: " 
             --print $ show frac_mpfr
             let temp = M.div2i rndModeVal precVal frac_mpfr wFVal -- (frac/2^(wF))
@@ -186,7 +178,7 @@ convertFoFloattoMPFR fofloat = do
             let unbiased_exp = expVal - (DBits.shiftL 1 (fromIntegral wEVal - 1)) + 1
             --print $ "Unbiased Exponent: " 
             --print $ show unbiased_exp
-            let mpfr_val = M.mul2i rndModeVal precVal temp1 (P.fromInteger unbiased_exp)
+            let mpfr_val = M.mul2i rndModeVal precVal temp1 (P.fromInteger (toInteger unbiased_exp))
             --print $ "MPFR Value: " 
             --print $ show mpfr_val
             if signVal == 1 then do
@@ -262,7 +254,10 @@ convertMPFRtoFoFloat num wEVal wFVal = do
                 fractionalVal = P.fromIntegral tempfracVal}
 
 -}
-
+convertFoFloattoFoFloat::FoFloat -> Int -> Int ->FoFloat
+convertFoFloattoFoFloat fofloat wEVal wFVal = do
+    let num::M.MPFR = convertFoFloattoMPFR fofloat
+    convertMPFRtoFoFloat num wEVal wFVal
 
 convertMPFRtoFoFloat :: M.MPFR -> Int -> Int ->  FoFloat
 convertMPFRtoFoFloat num wEVal wFVal = do
@@ -408,7 +403,7 @@ instance Num FoFloat where
 --     fromInteger i@(J# n _) = fromIntegerA Zero (fromIntegral . abs $ E.I# n * bitsPerIntegerLimb) i
 -- #endif
 decomposeFoFloat::FoFloat -> (Integer, Integer)
-decomposeFoFloat fofloat = (fractionalVal fofloat, (exponentVal fofloat) - (DBits.shiftL 1 (fromIntegral (wE fofloat) - 1)) + 1)
+decomposeFoFloat fofloat = (toInteger (fractionalVal fofloat), (toInteger (exponentVal fofloat)) - (DBits.shiftL 1 (fromIntegral (wE fofloat) - 1)) + 1)
 
 cmpFoFloat :: FoFloat -> FoFloat -> P.Ordering
 cmpFoFloat fo1 fo2 = do
