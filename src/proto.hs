@@ -38,11 +38,11 @@ import Clash.Explicit.Testbench
 import qualified Data.Text as Text
 import Clash.Netlist.BlackBox.Util (bbResult)
 import Data.Proxy
-
+type MyFloat = FoFloat 4 11 M.Near
 
 type N = 1
 xp = SNat::SNat N
-
+{-
 plusFloatBV
   :: forall exponentBits mantissaBits rndMode n . 
   (KnownNat exponentBits, KnownNat mantissaBits) =>
@@ -60,11 +60,19 @@ plusFloat
   -> DSignal System n (FoFloat 4 11 M.Near)
   -> DSignal System (n + N) (FoFloat 4 11 M.Near)
 plusFloat clk a b = C.unpack <$> plusFloatBV (Proxy @(FoFloat 4 11 M.Near)) clk (C.pack <$> a) (C.pack <$> b)
+-}
 
-{-# OPAQUE plusFloatBV #-}
-{-# ANN plusFloatBV (
+plusFloat
+  :: forall n . 
+  Clock System
+  -> DSignal System n (FoFloat 4 11 M.Near)
+  -> DSignal System n (FoFloat 4 11 M.Near)
+  -> DSignal System (n + N) (FoFloat 4 11 M.Near)
+plusFloat clk a b = delayN xp undefined enableGen clk (a + b)
+{-# OPAQUE plusFloat #-}
+{-# ANN plusFloat (
     let
-      primName = show 'plusFloatBV
+      primName = show 'plusFloat
       tfName = show 'plusFloatBBF
     in
       InlineYamlPrimitive [minBound..] [__i|
@@ -146,8 +154,7 @@ topEntity ::
   DSignal System 0 (FoFloat 4 11 M.Near) ->
   DSignal System 0 (FoFloat 4 11 M.Near) ->
   DSignal System (0 + N) (FoFloat 4 11 M.Near)
-topEntity clk x y =
-  plusFloat clk x y
+topEntity  = plusFloat 
 
 {-# OPAQUE topEntity #-}
 {-# ANN topEntity

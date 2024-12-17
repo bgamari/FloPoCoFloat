@@ -3,7 +3,8 @@
 module FPFloat  where
 import qualified Data.Number.MPFR as M --import functions
 -- import instances
-
+import qualified Data.Number.MPFR.Mutable as MM
+import GHC.Generics(Generic)
 
 import Clash.Prelude
 import Control.Monad.ST(runST, ST)
@@ -20,7 +21,7 @@ import Debug.Trace (trace)
 import Data.Ratio
 import Data.Proxy
 import Data.Data  (Data)
-import Distribution.Compat.Lens (_1)
+
 
 
 

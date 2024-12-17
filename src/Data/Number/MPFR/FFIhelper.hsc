@@ -1,5 +1,4 @@
 {-# LANGUAGE ForeignFunctionInterface, DeriveGeneric, DeriveDataTypeable, GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DataKinds #-}
 #include <chsmpfr.h>
 #include <mpfr.h>
 
