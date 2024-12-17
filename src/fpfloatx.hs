@@ -5,7 +5,7 @@
 {-# LANGUAGE TypeFamilies #-}
 module FPFloatX  where
 
-import FPFloat 
+import  FPFloat 
 import Clash.Prelude
 import qualified Prelude as P 
 import Data.Typeable (cast, Typeable)
@@ -17,16 +17,11 @@ import qualified FPFloat as FP
 
 
 
-
 type role FoFloatX nominal nominal nominal
 
-newtype FoFloatX (rnd :: M.RoundMode) (wE :: Nat) (wF :: Nat) = FoFloatX{unFoFloatX::BitVector (2 + 1 + wE + wF)}
-  deriving (Typeable, Generic, Eq, NFDataX, ShowX)
+newtype FoFloatX (rnd :: M.RoundMode) (wE :: Nat) (wF :: Nat) = FoFloatX{unFoFloatX::BitVector (2 + 1 + wE + wF)} 
+  deriving (Typeable, Generic, Eq, NFDataX)
 
-instance BitPack (Proxy a) where
-    type BitSize (Proxy a) = 0
-    pack _ = 0
-    unpack _ = Proxy
 
 
 class KnownRnd (rnd :: M.RoundMode) where
@@ -43,22 +38,6 @@ instance KnownRnd M.Near where
 
 instance KnownRnd M.Zero where
     rndVal _ = M.Zero
-
-
-data FoFloat2 exponentBits mantissaBits (rndMode :: M.RoundMode) =
-      FoFloat2 { ext' :: (BitVector 2)
-              , sign' :: Bit
-              , wE' :: (BitVector exponentBits)
-              , wF' :: (BitVector mantissaBits)
-              , rndMode' :: (Proxy rndMode)
-              }
-    deriving (Generic, Typeable, Show, BitPack)
-
-a :: FoFloat2 5 10 M.Near
-a = FoFloat2 1 0 5 3 Proxy :: FoFloat2 5 10 (M.Near)
-
-getMantissaBits :: forall a exponentBits mantissaBits rndMode . (Num a, KnownNat mantissaBits) => FoFloat2 exponentBits mantissaBits rndMode -> a 
-getMantissaBits _ = natToNum @mantissaBits
 
 toFoFloat ::
     forall wE wF rnd .
@@ -125,20 +104,15 @@ fromFoFloat ::
     (KnownRnd rnd, KnownNat we, KnownNat wf) =>
     FoFloat ->
     FoFloatX rnd we wf
-fromFoFloat  fofloat = 
+fromFoFloat  (FoFloat {..}) = 
     let 
         -- Convert fields to BitVector with appropriate sizes
-        
-        
-
-        newfofloat = FP.convertFoFloattoFoFloat fofloat (fromInteger (natVal (Proxy @we))) (fromInteger (natVal (Proxy @wf)))
-        extXX = bitCoerce (ext newfofloat) :: BitVector 2
-        signXX = bitCoerce (sign newfofloat) :: BitVector 1
-        expXX = resize ((fromIntegral (exponentVal newfofloat)) :: BitVector 64) :: BitVector we
-        fracXX = resize ((fromIntegral (fractionalVal newfofloat)) :: BitVector 64) :: BitVector wf
+        signXX = bitCoerce sign :: BitVector 1
+        expXX = resize ((fromIntegral exponentVal) :: BitVector 64) :: BitVector we
+        fracXX = resize ((fromIntegral fractionalVal) :: BitVector 64) :: BitVector wf
         
         -- Combine fields into a single BitVector
-        vecres = extXX ++# signXX ++# expXX ++# fracXX
+        vecres = ext ++# signXX ++# expXX ++# fracXX
     in
         FoFloatX vecres
         
@@ -183,12 +157,8 @@ instance (KnownNat wE, KnownNat wF, KnownRnd rnd) => Num (FoFloatX rnd wE wF) wh
 
     fromInteger i = fromFoFloat (fromInteger i)  
 
-
-instance (KnownNat wE, KnownNat wF, KnownRnd rnd) => ShowMPFR (FoFloatX rnd wE wF) where
-  showMPFR = showMPFR . toFoFloat
-
 instance (KnownNat wE, KnownNat wF, KnownRnd rnd) => Show (FoFloatX rnd wE wF) where
-  show = P.show . toFoFloat
+  show = show . toFoFloat
 
 instance (KnownNat wE, KnownNat wF, KnownRnd rnd) => Real (FoFloatX rnd wE wF)where
     toRational d = n % (2  P.^ e)
@@ -211,13 +181,8 @@ instance (KnownRnd rnd, KnownNat we, KnownNat wf) => Fractional (FoFloatX rnd we
         fromFoFloat temp 
     
     fromRational r = do 
-    --    let temp::FoFloat = fromRational r 
-    --    fromFoFloat temp 
-        let precfo = (fromInteger (natVal (Proxy @wf))) + 1
-        let n = M.fromIntegerA M.Near precfo (P.fromInteger (numerator r))
-        let d = M.fromIntegerA M.Near precfo (P.fromInteger (denominator r))
-        let temp = M.div M.Near precfo n d
-        fromFoFloat (convertMPFRtoFoFloat temp (fromInteger (natVal (Proxy @we))) (fromInteger (natVal (Proxy @wf))))
+        let temp::FoFloat = fromRational r 
+        fromFoFloat temp 
     recip d        = do
         let temp::FoFloat = toFoFloat d 
         let res = recip temp 
@@ -266,7 +231,7 @@ instance (KnownRnd rnd, KnownNat we, KnownNat wf) => RealFloat (FoFloatX rnd we 
     floatRadix _ = 2
     
     floatDigits _ = (fromInteger (natVal (Proxy @we))) + (fromInteger (natVal (Proxy @wf))) + 1 + 2
-    floatRange _ = error "floatRange is not defined for FoFloatX numbers"
+    floatRange _ = error "floatRange is not defined for FoFloat numbers"
     decodeFloat x = (d,e)
       where
       (d,eE) = decomposeFoFloatX x

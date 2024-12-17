@@ -2,9 +2,10 @@
 {-# LANGUAGE DeriveGeneric #-}
 module FPFloat  where
 import qualified Data.Number.MPFR as M --import functions
--- import instances
+import Data.Number.MPFR.Instances.Up -- import instances
 
-
+import qualified Data.Number.MPFR.Mutable as MM
+import GHC.Generics(Generic)
 import Clash.Prelude
 import Control.Monad.ST(runST, ST)
 import Data.Typeable (cast, Typeable)
@@ -20,9 +21,6 @@ import Debug.Trace (trace)
 import Data.Ratio
 import Data.Proxy
 import Data.Data  (Data)
-import Distribution.Compat.Lens (_1)
-
-
 
 
 {-
@@ -45,42 +43,16 @@ main = do print $ s1 1000 100000
     
 one = 1 :: M.MPFR
 -}
-
-instance BitPack (Proxy a) where
-    type BitSize (Proxy a) = 0
-    pack _ = 0
-    unpack _ = Proxy
-
-
-class KnownRnd (rnd :: M.RoundMode) where
-    rndVal :: Proxy rnd -> M.RoundMode 
-
-instance KnownRnd M.Up where
-    rndVal _ = M.Up
-
-instance KnownRnd M.Down where
-    rndVal _ = M.Down
-
-instance KnownRnd M.Near where
-    rndVal _ = M.Near
-
-instance KnownRnd M.Zero where
-    rndVal _ = M.Zero
-
--- type role FoFloat nominal nominal nominal 
-data FoFloat (wE::Nat ) (wF::Nat) (rndMode:: M.RoundMode) =
+data FoFloat =
       FoFloat { ext :: (BitVector 2)
               , sign :: Bit
-              , exponentVal:: (BitVector wE)
-              , fractionalVal:: (BitVector wF)
-              , rndModeVal :: (Proxy rndMode)
+              , wE :: Int
+              , wF :: Int
+              , rndMode :: M.RoundMode
+              , exponentVal:: Unsigned 64
+              , fractionalVal::Unsigned 64
               }
-    deriving (Generic, Typeable,Show, BitPack, Eq, NFDataX, ShowX, Lift)
-
-deriving instance (Lift (Proxy a))
-deriving instance (NFDataX (Proxy a))
-deriving instance (ShowX (Proxy a))
-
+    deriving (Typeable, Generic, Show)
 data IEEEFloat = IEEEFloat { signI :: Bit
                 , wEI :: Int
                 , wFI:: Int
@@ -89,14 +61,6 @@ data IEEEFloat = IEEEFloat { signI :: Bit
                 , fracI:: Integer
                 }
     deriving (Typeable, Generic, Show)
-
-class ShowMPFR a where
-    showMPFR::a -> P.String
-
-instance  (KnownNat wE, KnownNat wF, KnownRnd rnd) => ShowMPFR (FoFloat wE wF rnd) where
-    showMPFR = P.show .toMPFR
-
-
 
 {-
 
@@ -109,7 +73,6 @@ instance  (KnownNat wE, KnownNat wF, KnownRnd rnd) => ShowMPFR (FoFloat wE wF rn
       exp1 == exp2 &&
       frac1 == frac2
 -}
-{-
 eqRoundMode :: M.RoundMode -> M.RoundMode -> Bool
 eqRoundMode M.Near       M.Near       = True
 eqRoundMode M.Zero       M.Zero       = True
@@ -129,14 +92,14 @@ instance Eq FoFloat where
       frac1 == frac2
 
   _ == _ = False
--}
+
 
 --newtype FoFloatX wE wF rndMode = FoFloatX {getBV :: BitVector (2 + wE + wF)}
 
 --convertMPFRToBitVector :: MPFR -> BitVector n
 {-
-toMPFR::FoFloat -> M.MPFR
-toMPFR fofloat = do
+convertFoFloattoMPFR::FoFloat -> M.MPFR
+convertFoFloattoMPFR fofloat = do
     let extVal = ext fofloat
     let signVal = sign fofloat
     let wEVal = wE fofloat
@@ -178,65 +141,48 @@ toMPFR fofloat = do
                 mpfr_val
 -}
 
-getRoundMode::
-    forall wE wF rnd .
-    (KnownNat wE, KnownNat wF, KnownRnd rnd) =>
-    FoFloat wE wF rnd ->
-    M.RoundMode
-getRoundMode fofloat = rndVal (rndModeVal fofloat)
-toMPFR ::
-    forall wE wF rnd .
-    (KnownNat wE, KnownNat wF, KnownRnd rnd) =>
-    FoFloat wE wF rnd ->
-    M.MPFR
-toMPFR fofloat = do
-    let 
-        extVal :: BitVector 2 = ext fofloat
-        signVal :: Bit = sign fofloat
-        expBV :: BitVector wE = exponentVal fofloat
-        fracBV :: BitVector wF = fractionalVal fofloat
-    let wEVal::Int =  fromInteger (natVal (Proxy @wE))
-    let wFVal =  fromInteger (natVal (Proxy @wF))
-    let rndModeVal = getRoundMode fofloat
-    let expVal = bitCoerce (expBV) ::Unsigned wE
-    let fracVal = bitCoerce (fracBV) ::Unsigned wF
+
+convertFoFloattoMPFR :: FoFloat -> M.MPFR
+convertFoFloattoMPFR fofloat = do
+    let extVal = ext fofloat
+    let signVal = sign fofloat
+    let wEVal = wE fofloat
+    let wFVal = wF fofloat
+    let rndModeVal = rndMode fofloat
+    let expVal = exponentVal fofloat
+    let fracVal = fractionalVal fofloat
 
     case extVal of
         -- Zero case
         00 -> do
             if signVal == 0 then
-                M.fromDouble rndModeVal (1 + wFVal) 0.0
+                M.fromDouble rndModeVal (1 + fromIntegral wFVal) 0.0
             else
-                M.fromDouble rndModeVal (1 + wFVal) (-0.0)
+                M.fromDouble rndModeVal (1 + fromIntegral wFVal) (-0.0)
         -- Infinity case
         10 -> do
             if signVal == 0 then
-                M.setInf (1 + wFVal) 1
+                M.setInf (1 + fromIntegral wFVal) 1
             else
-                M.setInf (1 + wFVal) (-1)
+                M.setInf (1 + fromIntegral wFVal) (-1)
         -- NaN case
         11 -> do
-            let val = M.setNaN (1 + wFVal)
+            let val = M.setNaN (1 + fromIntegral wFVal)
             val
         -- Normal number case
         01 -> do
             -- mpfr_val = (-1)^(sign) * (1 + frac/2^(wF))*2^(unbiased_exp)
             -- unbiased_exp = exp - (shiftL 1 (wE - 1) ) + 1
-            let precVal = 2 + wFVal
+            let precVal = 2 + fromIntegral wFVal
             --print $ "Precision Value: "
             --print $ show precVal
             let frac_mpfr = M.fromIntegerA rndModeVal precVal (toInteger fracVal)
             --print $ "Fraction as MPFR: " 
             --print $ show frac_mpfr
-            let temp = M.div2i rndModeVal precVal frac_mpfr (fromIntegral wFVal) -- (frac/2^(wF))
+            let temp = M.div2i rndModeVal precVal frac_mpfr wFVal -- (frac/2^(wF))
             --print $ "Fraction after division: " 
             --print $ show temp
             let temp1 = M.addw rndModeVal precVal temp 1 -- (1 + frac/2^(wF))
-
-            --
-            -- let _ = rndVal $ Proxy @rndMode 
-
-
             --print $ "Fraction after addition: " 
             --print $ show temp1
             let unbiased_exp = expVal - (DBits.shiftL 1 (fromIntegral wEVal - 1)) + 1
@@ -255,45 +201,102 @@ toMPFR fofloat = do
                 mpfr_val
                 --return $ mpfr_val
 
+{-
+convertMPFRtoFoFloat::M.MPFR -> Int -> Int  -> FoFloat
+convertMPFRtoFoFloat num wEVal wFVal = do
+    let rndVal = M.Near
+    if (M.isNaN num) then
+        FoFloat {ext = 11, sign = 1, wE = wEVal, wF = wFVal,rndMode = rndVal ,exponentVal = 0, fractionalVal = 0}
+    else if (M.isInfinite num) then
+        FoFloat {ext = 10, sign = if ((fromMaybe 0 (M.sgn num)) > 0) then 0 else 1,  wE = wEVal, wF = wFVal, rndMode = rndVal ,exponentVal = 0, fractionalVal = 0}
+    else if (M.isZero num)  then
+        FoFloat {ext = 00, sign = if M.signbit num == P.False then 0 else 1, wE = wEVal, wF = wFVal,rndMode = rndVal ,exponentVal = 0, fractionalVal = 0}
+    else do
+        -- getExp return exponent for significant in [1/2,1)
+		-- but we require [1,2). Hence the -1.
+        let expVal::Int = unsafeCoerce (M.getExp num  - 1)
+        let precVal = M.getPrec num
+        let absVal = M.absD rndVal precVal num
+        let temp = M.div2i rndVal precVal absVal expVal
+        let temp1 = M.subw rndVal precVal temp 1
+        let temp2 = M.mul2i rndVal precVal temp1 wFVal 
+        let tempfracVal = M.toInt rndVal temp2 
+        -- Due to rounding, the fraction might overflow (i.e. become bigger
+		-- then we expect).
+        
+        let valcomp = DBits.shiftL 1 wFVal
+        if (tempfracVal == valcomp) then
+            FoFloat {ext = 01, sign = if ((fromMaybe 0 ( M.sgn num)) > 0) then 0 else 1, wE = wEVal, wF = wFVal,rndMode = rndVal ,exponentVal = P.fromIntegral (expVal + 1), fractionalVal = 0}
+        else if (tempfracVal > valcomp) then
+            unsafePerformIO (error "Fraction is too big after conversion")
+        else if (tempfracVal < valcomp) then
+            unsafePerformIO (error "Fraction is negative after conversion")
+        else do
+            let biasedExp = expVal + ((DBits.shiftL 1 (wEVal - 1)) - 1)
+            -- Handle underflow
+            if (biasedExp < 0) then 
+                FoFloat 
+                {ext = 00, 
+                sign = if ((fromMaybe 0 (M.sgn num)) > 0) then 0 else 1, 
+                wE = wEVal, 
+                wF = wFVal,
+                rndMode = rndVal ,
+                exponentVal = 0, 
+                fractionalVal = 0}
+            -- Handle overflow
+            else if(biasedExp >= (DBits.shiftL 1 wEVal)) then 
+                FoFloat 
+                {ext = 10, 
+                sign = if ((fromMaybe 0(M.sgn num)) > 0) then 0 else 1, 
+                wE = wEVal, 
+                wF = wFVal,
+                rndMode = rndVal ,
+                exponentVal = 0, 
+                fractionalVal = 0}
+            else 
+                FoFloat 
+                {ext = 01, 
+                sign = if ((fromMaybe 0 (M.sgn num)) > 0) then 0 else 1, 
+                wE = wEVal, 
+                wF = wFVal,
+                rndMode = rndVal ,
+                exponentVal = P.fromIntegral  expVal, 
+                fractionalVal = P.fromIntegral tempfracVal}
+
+-}
 
 
-toFoFloat :: 
-    forall wE wF rnd .
-    (KnownNat wE, KnownNat wF, KnownRnd rnd) =>
-    M.MPFR ->  
-    FoFloat wE wF rnd
-toFoFloat num = do
-    let rndValue = M.Near
+convertMPFRtoFoFloat :: M.MPFR -> Int -> Int ->  FoFloat
+convertMPFRtoFoFloat num wEVal wFVal = do
+    let rndVal = M.Near
         -- Print debug information to stdout
     
     if M.isNaN num then
-        FoFloat {ext = 11, sign = 1, rndModeVal = Proxy, exponentVal = 0, fractionalVal = 0}:: FoFloat wE wF rndVal
+        FoFloat {ext = 11, sign = 1, wE = wEVal, wF = wFVal, rndMode = rndVal, exponentVal = 0, fractionalVal = 0}
     else if M.isInfinite num then
-        FoFloat {ext = 10, sign = if (fromMaybe 0 (M.sgn num)) > 0 then 0 else 1, rndModeVal = Proxy, exponentVal = 0, fractionalVal = 0}:: FoFloat wE wF rndVal
+        FoFloat {ext = 10, sign = if (fromMaybe 0 (M.sgn num)) > 0 then 0 else 1, wE = wEVal, wF = wFVal, rndMode = rndVal, exponentVal = 0, fractionalVal = 0}
     else if M.isZero num then
-        FoFloat {ext = 00, sign = if M.signbit num == P.False then 0 else 1, rndModeVal = Proxy, exponentVal = 0, fractionalVal = 0}:: FoFloat wE wF rndVal
+        FoFloat {ext = 00, sign = if M.signbit num == P.False then 0 else 1, wE = wEVal, wF = wFVal, rndMode = rndVal, exponentVal = 0, fractionalVal = 0}
     else do
         let expVal :: Int = fromIntegral (M.getExp num - 1)
-        let wFVal ::Int = fromInteger (natVal (Proxy @wF))
-        let wEVal ::Int = fromInteger (natVal (Proxy @wE))
         --print ("Exponent value: ")
         --print (expVal)
         let precVal = M.getPrec num
         --print ("Precision value: ")
         --print (precVal)
-        let absVal = M.absD rndValue precVal num
+        let absVal = M.absD rndVal precVal num
         --print ("Absolute value: ")
         --print (M.toStringExp 32 absVal)
-        let temp = M.div2i rndValue precVal absVal expVal
+        let temp = M.div2i rndVal precVal absVal expVal
         --print ("Temporary value after div2i: " )
         --print (M.toStringExp 32 temp)
-        let temp1 = M.subw rndValue precVal temp 1
+        let temp1 = M.subw rndVal precVal temp 1
         --print ("Temporary value after subw: ")
         --print ( M.toStringExp 32 temp1)
-        let temp2 = M.mul2i rndValue precVal temp1 wFVal
+        let temp2 = M.mul2i rndVal precVal temp1 wFVal
         --print ("Temporary value after mul2i: ")
         --print ( M.toStringExp 32 temp2)
-        let tempfracVal = M.toInt rndValue temp2
+        let tempfracVal = M.toInt rndVal temp2
         --print ("Fractional value: ")
         --print ( show tempfracVal)
 
@@ -304,7 +307,7 @@ toFoFloat num = do
         --print ( show valcomp)
         if tempfracVal == valcomp then do 
             let biasedExp = expVal + 1 + ((DBits.shiftL 1 (wEVal - 1)) - 1) 
-            FoFloat {ext = 01, sign = if (fromMaybe 0 (M.sgn num)) > 0 then 0 else 1, rndModeVal = Proxy, exponentVal = P.fromIntegral biasedExp, fractionalVal = 0}:: FoFloat wE wF rndVal
+            FoFloat {ext = 01, sign = if (fromMaybe 0 (M.sgn num)) > 0 then 0 else 1, wE = wEVal, wF = wFVal, rndMode = rndVal, exponentVal = P.fromIntegral biasedExp, fractionalVal = 0}
         else if tempfracVal > valcomp then
             error "Fraction is too big after conversion"
         else if tempfracVal < 0 then
@@ -315,48 +318,26 @@ toFoFloat num = do
             --print (P.show biasedExp)
             -- Handle underflow
             if biasedExp < 0 then
-                FoFloat {ext = 00, sign = if (fromMaybe 0 (M.sgn num)) > 0 then 0 else 1, rndModeVal = Proxy, exponentVal = 0, fractionalVal = 0}:: FoFloat wE wF rndVal
+                FoFloat {ext = 00, sign = if (fromMaybe 0 (M.sgn num)) > 0 then 0 else 1, wE = wEVal, wF = wFVal, rndMode = rndVal, exponentVal = 0, fractionalVal = 0}
             -- Handle overflow
             else if biasedExp >= (DBits.shiftL 1 wEVal) then
-                FoFloat {ext = 10, sign = if (fromMaybe 0 (M.sgn num)) > 0 then 0 else 1, rndModeVal = Proxy, exponentVal = 0, fractionalVal = 0}:: FoFloat wE wF rndVal
+                FoFloat {ext = 10, sign = if (fromMaybe 0 (M.sgn num)) > 0 then 0 else 1, wE = wEVal, wF = wFVal, rndMode = rndVal, exponentVal = 0, fractionalVal = 0}
             else
-                FoFloat {ext = 01, sign = if (fromMaybe 0 (M.sgn num)) > 0 then 0 else 1, rndModeVal = Proxy, exponentVal = P.fromIntegral biasedExp, fractionalVal = P.fromIntegral tempfracVal}:: FoFloat wE wF rndVal
+                FoFloat {ext = 01, sign = if (fromMaybe 0 (M.sgn num)) > 0 then 0 else 1, wE = wEVal, wF = wFVal, rndMode = rndVal, exponentVal = P.fromIntegral biasedExp, fractionalVal = P.fromIntegral tempfracVal}
         
+        
+convertto
 
+getPrecision::FoFloat -> M.Precision
+getPrecision fofloat = fromIntegral (wE fofloat) + fromIntegral (wF fofloat)
 
---showMPFR::FoFloat -> String
---showMPFR fofloat = P.show (toMPFR fofloat)
-{-       
-convertFoFloattoFoFloat::FoFloat -> Int -> Int ->FoFloat
-convertFoFloattoFoFloat fofloat wEVal wFVal = do
-    let num::M.MPFR = toMPFR fofloat
-    toFoFloat num wEVal wFVal
--}
-
-getPrecision::
-    forall wE wF rnd .
-    (KnownNat wE, KnownNat wF, KnownRnd rnd) =>
-    FoFloat wE wF rnd-> 
-    M.Precision
-getPrecision _ = fromInteger (natVal (Proxy @wE)) + fromInteger (natVal (Proxy @wF))
-
-maxPrecision::
-    forall wE wF rnd wE1 wF1 rnd1.
-    (KnownNat wE, KnownNat wF, KnownRnd rnd, KnownNat wE1, KnownNat wF1, KnownRnd rnd1) =>
-    FoFloat wE wF rnd -> 
-    FoFloat wE1 wF1 rnd1 -> 
-    M.Precision
+maxPrecision::FoFloat -> FoFloat -> M.Precision
 maxPrecision fo1 fo2 = do
     let a = getPrecision fo1 
     let b =  getPrecision fo2
     P.max a b
 
-minPrecision::
-    forall wE wF rnd wE1 wF1 rnd1.
-    (KnownNat wE, KnownNat wF, KnownRnd rnd, KnownNat wE1, KnownNat wF1, KnownRnd rnd1) =>
-    FoFloat wE wF rnd -> 
-    FoFloat wE1 wF1 rnd1 -> 
-    M.Precision
+minPrecision::FoFloat -> FoFloat -> M.Precision
 minPrecision fo1 fo2 = do
     let a = getPrecision fo1 
     let b =  getPrecision fo2
@@ -365,54 +346,51 @@ minPrecision fo1 fo2 = do
 --type role FoFloat representational nominal nominal
 --newtype FoFloat (rep:: Nat -> Type) (wE :: Nat) (wF :: Nat) = 
 
-getwEwFfromMaxPrec:: forall wE wF rnd wE1 wF1 rnd1.
-    (KnownNat wE, KnownNat wF, KnownRnd rnd, KnownNat wE1, KnownNat wF1, KnownRnd rnd1) =>
-    FoFloat wE wF rnd -> 
-    FoFloat wE1 wF1 rnd1 -> 
-    (Int, Int)
+getwEwFfromMaxPrec:: FoFloat -> FoFloat -> (Int, Int)
 getwEwFfromMaxPrec fo1 fo2 = do
     if(getPrecision fo1 == maxPrecision fo1 fo2) then
-        (fromInteger (natVal (Proxy @wE)), fromInteger (natVal  (Proxy @wF)))
+        (wE fo1, wF fo1)
     else
-        (fromInteger (natVal (Proxy @wE1)), fromInteger (natVal  (Proxy @wF1)))
+        (wE fo2, wF fo2)
 
-getwEwFfromMinPrec:: forall wE wF rnd wE1 wF1 rnd1.
-    (KnownNat wE, KnownNat wF, KnownRnd rnd, KnownNat wE1, KnownNat wF1, KnownRnd rnd1) =>
-    FoFloat wE wF rnd -> 
-    FoFloat wE1 wF1 rnd1 ->  
-    (Int, Int) 
+getwEwFfromMinPrec:: FoFloat -> FoFloat -> (Int, Int)
 getwEwFfromMinPrec fo1 fo2 = do
     if(getPrecision fo1 == minPrecision fo1 fo2) then
-        (fromInteger (natVal (Proxy @wE)), fromInteger (natVal  (Proxy @wF)))
+        (wE fo1, wF fo1)
     else
-        (fromInteger (natVal (Proxy @wE1)), fromInteger (natVal  (Proxy @wF1)))
+        (wE fo2, wF fo2)
 
 
-instance (KnownNat wE, KnownNat wF, KnownRnd rnd) => Num (FoFloat wE wF rnd) where
+instance Num FoFloat where
     f1 + f2        = do
-        let m1 = toMPFR f1
-        let m2 = toMPFR f2
-        let temp = M.add (rndVal (Proxy @rnd)) (getPrecision f1) m1 m2
-        toFoFloat temp 
+        let m1 = convertFoFloattoMPFR f1
+        let m2 = convertFoFloattoMPFR f2
+        let temp = M.add (rndMode f1) (maxPrecision f1 f2) m1 m2
+        let (wEVal, wFVal) = getwEwFfromMaxPrec f1 f2 
+        convertMPFRtoFoFloat temp wEVal wFVal 
     f1 - f2        = do
-        let m1 = toMPFR f1
-        let m2 = toMPFR f2
-        let temp = M.sub (rndVal (Proxy @rnd)) (maxPrecision f1 f2) m1 m2
-        toFoFloat temp 
+        let m1 = convertFoFloattoMPFR f1
+        let m2 = convertFoFloattoMPFR f2
+        let temp = M.sub (rndMode f1) (maxPrecision f1 f2) m1 m2
+        let (wEVal, wFVal) = getwEwFfromMaxPrec f1 f2 
+        convertMPFRtoFoFloat temp wEVal wFVal 
         
     f1 * f2        = do 
-        let m1 = toMPFR f1
-        let m2 = toMPFR f2
-        let temp = M.mul (rndVal (Proxy @rnd)) (maxPrecision f1 f2) m1 m2
-        toFoFloat temp 
+        let m1 = convertFoFloattoMPFR f1
+        let m2 = convertFoFloattoMPFR f2
+        let temp = M.mul (rndMode f1) (maxPrecision f1 f2) m1 m2
+        let (wEVal, wFVal) = getwEwFfromMaxPrec f1 f2 
+        convertMPFRtoFoFloat temp wEVal wFVal
     negate f1      = do
-        let m1 = toMPFR f1
-        let temp = M.neg (rndVal (Proxy @rnd)) (getPrecision f1) m1
-        toFoFloat temp 
+        let m1 = convertFoFloattoMPFR f1
+        let temp = M.neg (rndMode f1) (getPrecision f1) m1
+        let (wEVal, wFVal) =(wE f1, wF f1) 
+        convertMPFRtoFoFloat temp wEVal wFVal
     abs f1         = do
-        let m1 = toMPFR f1
-        let temp = M.absD (rndVal (Proxy @rnd)) (getPrecision f1) m1
-        toFoFloat temp 
+        let m1 = convertFoFloattoMPFR f1
+        let temp = M.absD (rndMode f1) (getPrecision f1) m1
+        let (wEVal, wFVal) =(wE f1, wF f1) 
+        convertMPFRtoFoFloat temp wEVal wFVal
     signum f1     = 
         if (ext f1) == 00 then 0
         else if (ext f1) == 11 then f1
@@ -421,7 +399,7 @@ instance (KnownNat wE, KnownNat wF, KnownRnd rnd) => Num (FoFloat wE wF rnd) whe
             if(sign f1) == 0 then 1 else 0
             
 
-    fromInteger i = toFoFloat (M.fromIntegerA (rndVal (Proxy @rnd)) (fromInteger (natVal (Proxy @wE)) + fromInteger (natVal (Proxy @wF))) i) 
+    fromInteger i = convertMPFRtoFoFloat (M.fromIntegerA M.Near 23 i) 8 23
         
 -- #ifdef INTEGER_SIMPLE
 --     fromInteger i =
@@ -431,121 +409,93 @@ instance (KnownNat wE, KnownNat wF, KnownRnd rnd) => Num (FoFloat wE wF rnd) whe
 --     fromInteger (S# i) = fromInt Zero minPrec (E.I# i)
 --     fromInteger i@(J# n _) = fromIntegerA Zero (fromIntegral . abs $ E.I# n * bitsPerIntegerLimb) i
 -- #endif
-decomposeFoFloat:: 
-    forall wE wF rnd .
-    (KnownNat wE, KnownNat wF, KnownRnd rnd) =>
-    FoFloat wE wF rnd-> 
-    (Integer, Integer)
-decomposeFoFloat fofloat = (toInteger (fractionalVal fofloat),toInteger (exponentVal fofloat) - (DBits.shiftL 1 (fromInteger (natVal (Proxy @wE)) - 1)) + 1)
+decomposeFoFloat::FoFloat -> (Integer, Integer)
+decomposeFoFloat fofloat = (toInteger (fractionalVal fofloat),toInteger (exponentVal fofloat) - (DBits.shiftL 1 (fromIntegral (wE fofloat) - 1)) + 1)
 
-cmpFoFloat :: 
-    forall wE wF rnd.
-    (KnownNat wE, KnownNat wF, KnownRnd rnd) =>
-    FoFloat wE wF rnd -> 
-    FoFloat wE wF rnd -> 
-    P.Ordering
+cmpFoFloat :: FoFloat -> FoFloat -> P.Ordering
 cmpFoFloat fo1 fo2 = do
-    let m1 = toMPFR fo1 
-    let m2 = toMPFR fo2 
+    let m1 = convertFoFloattoMPFR fo1 
+    let m2 = convertFoFloattoMPFR fo2 
     P.compare m1 m2 
 
-lessFoFloat :: 
-    forall wE wF rnd.
-    (KnownNat wE, KnownNat wF, KnownRnd rnd) =>
-    FoFloat wE wF rnd -> 
-    FoFloat wE wF rnd ->  
-    P.Bool
+lessFoFloat :: FoFloat -> FoFloat -> P.Bool
 lessFoFloat fo1 fo2 = do 
-    let m1 = toMPFR fo1 
-    let m2 = toMPFR fo2 
+    let m1 = convertFoFloattoMPFR fo1 
+    let m2 = convertFoFloattoMPFR fo2 
     M.less m1 m2
-lesseqFoFloat :: 
-    forall wE wF rnd.
-    (KnownNat wE, KnownNat wF, KnownRnd rnd) =>
-    FoFloat wE wF rnd -> 
-    FoFloat wE wF rnd ->  
-    P.Bool
+lesseqFoFloat :: FoFloat -> FoFloat -> P.Bool
 lesseqFoFloat fo1 fo2 = do 
-    let m1 = toMPFR fo1 
-    let m2 = toMPFR fo2 
+    let m1 = convertFoFloattoMPFR fo1 
+    let m2 = convertFoFloattoMPFR fo2 
     M.lesseq m1 m2
-greaterFoFloat :: 
-    forall wE wF rnd.
-    (KnownNat wE, KnownNat wF, KnownRnd rnd) =>
-    FoFloat wE wF rnd -> 
-    FoFloat wE wF rnd ->  
-    P.Bool
+greaterFoFloat :: FoFloat -> FoFloat -> P.Bool
 greaterFoFloat fo1 fo2 = do 
-    let m1 = toMPFR fo1 
-    let m2 = toMPFR fo2 
+    let m1 = convertFoFloattoMPFR fo1 
+    let m2 = convertFoFloattoMPFR fo2 
     M.greater m1 m2
-greatereqFoFloat :: 
-    forall wE wF rnd.
-    (KnownNat wE, KnownNat wF, KnownRnd rnd) =>
-    FoFloat wE wF rnd -> 
-    FoFloat wE wF rnd ->  
-    P.Bool
+greatereqFoFloat :: FoFloat -> FoFloat -> P.Bool
 greatereqFoFloat fo1 fo2 = do 
-    let m1 = toMPFR fo1 
-    let m2 = toMPFR fo2 
+    let m1 = convertFoFloattoMPFR fo1 
+    let m2 = convertFoFloattoMPFR fo2 
     M.greatereq m1 m2
 
 
 
-instance  (KnownNat wE, KnownNat wF, KnownRnd rnd) => Ord (FoFloat wE wF rnd) where
+instance Ord FoFloat where
+    compare :: FoFloat -> FoFloat -> Ordering
     compare  = cmpFoFloat 
     (<)       = lessFoFloat
     (<=)      = lesseqFoFloat
     (>)       = greaterFoFloat
     (>=)      = greatereqFoFloat
-instance (KnownNat wE, KnownNat wF, KnownRnd rnd) => Real (FoFloat wE wF rnd) where
+instance Real FoFloat where
     toRational d = n % (2  P.^ e)
         where (n', e') = decomposeFoFloat d
               (n, e) = if e' >= 0 then ((n' * (2 P.^ e')), 0)
                          else (n', - e')
 
-instance  (KnownNat wE, KnownNat wF, KnownRnd rnd) => Fractional (FoFloat wE wF rnd) where
+instance Fractional FoFloat where
     f1 / f2        = do
-        let m1 = toMPFR f1
-        let m2 = toMPFR f2
-        let temp = M.div (rndVal (Proxy @rnd)) (maxPrecision f1 f2) m1 m2
-        
-        toFoFloat temp 
+        let m1 = convertFoFloattoMPFR f1
+        let m2 = convertFoFloattoMPFR f2
+        let temp = M.div (rndMode f1) (maxPrecision f1 f2) m1 m2
+        let (wEVal, wFVal) = getwEwFfromMaxPrec f1 f2 
+        convertMPFRtoFoFloat temp wEVal wFVal 
     fromRational r = do
-        let n = M.fromIntegerA M.Near (fromInteger (natVal (Proxy @wF))) (P.fromInteger (numerator r))
-        let d = M.fromIntegerA M.Near (fromInteger (natVal (Proxy @wF))) (P.fromInteger (denominator r))
-        let temp = M.div M.Near (fromInteger (natVal (Proxy @wF))) n d
-        toFoFloat temp 
+        let n = M.fromIntegerA M.Near 23 (P.fromInteger (numerator r))
+        let d = M.fromIntegerA M.Near 23 (P.fromInteger (denominator r))
+        let temp = M.div M.Near 23 n d
+        convertMPFRtoFoFloat temp 8 23
     recip d        = do
-        let one = M.fromWord M.Near (fromInteger (natVal (Proxy @wF))) 1
-        let denom = toMPFR d 
-        let temp = M.div (rndVal (Proxy @rnd)) (getPrecision d) one denom 
-        toFoFloat temp 
+        let one = M.fromWord M.Near 23 1
+        let denom = convertFoFloattoMPFR d 
+        let temp = M.div (rndMode d) (getPrecision d) one denom 
+        convertMPFRtoFoFloat temp (wE d) (wF d)
 
 
 
-instance (KnownNat wE, KnownNat wF, KnownRnd rnd) => Floating (FoFloat wE wF rnd) where
-    pi           = toFoFloat (M.pi M.Near (fromInteger (natVal (Proxy @wF)))) 
+instance Floating FoFloat where
+    pi           =convertMPFRtoFoFloat (M.pi M.Near 23) 8 23
     exp d        = do 
-        let temp = toMPFR d 
-        let tempres = M.exp (rndVal (Proxy @rnd)) (getPrecision d) temp 
-        toFoFloat tempres 
+        let temp = convertFoFloattoMPFR d 
+        let tempres = M.exp (rndMode d) (getPrecision d) temp 
+        convertMPFRtoFoFloat tempres (wE d) (wF d) 
     log d        = do 
-        let temp = toMPFR d 
+        let temp = convertFoFloattoMPFR d 
         let tempres = M.log M.Down (getPrecision d) temp 
-        let res = toFoFloat tempres 
-        --let tempres1 = M.log M.Up (getPrecision d) temp 
-        --let res1  = toFoFloat tempres1 
+        let res = convertMPFRtoFoFloat tempres (wE d) (wF d) 
+        let tempres1 = M.log M.Up (getPrecision d) temp 
+        let res1  = convertMPFRtoFoFloat tempres1 (wE d) (wF d) 
         res 
     sqrt d       = do 
-        let temp = toMPFR d 
-        let tempres = M.sqrt M.Near (getPrecision d) temp 
-        toFoFloat tempres 
+        let temp = convertFoFloattoMPFR d 
+        let tempres = M.sqrt (rndMode d) (getPrecision d) temp 
+        convertMPFRtoFoFloat tempres (wE d) (wF d)
     (**) f1 f2    = do 
-        let temp = toMPFR f1 
-        let temp1 = toMPFR f2
-        let tempres = M.pow (rndVal (Proxy @rnd)) (getPrecision f1) temp temp1
-        toFoFloat tempres 
+        let temp = convertFoFloattoMPFR f1 
+        let temp1 = convertFoFloattoMPFR f2
+        let tempres = M.pow (rndMode f1) (maxPrecision f1 f2) temp temp1
+        convertMPFRtoFoFloat tempres (wE f1) (wF f2)
     logBase d d' = error "logBase is not defined for FoFloat"
     sin d        = error "sin is not defined for FoFloat"
     cos d        = error "cos is not defined for FoFloat"
@@ -560,10 +510,10 @@ instance (KnownNat wE, KnownNat wF, KnownRnd rnd) => Floating (FoFloat wE wF rnd
     acosh d      = error "acosh is not defined for FoFloat"
     atanh d      = error "atanh is not defined for FoFloat"
 
-instance  (KnownNat wE, KnownNat wF, KnownRnd rnd) => RealFrac (FoFloat wE wF rnd) where
+instance RealFrac FoFloat where
     properFraction d = error "properFraction is not defined for FoFloat"
 
-instance  (KnownNat wE, KnownNat wF, KnownRnd rnd) => RealFloat (FoFloat wE wF rnd) where
+instance  RealFloat FoFloat where
     floatRadix _ = 2
     floatDigits = fromInteger . toInteger . getPrecision
     floatRange _ = error "floatRange is not defined for FoFloat numbers"

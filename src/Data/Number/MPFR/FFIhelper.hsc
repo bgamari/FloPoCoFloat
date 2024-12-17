@@ -8,7 +8,6 @@ module Data.Number.MPFR.FFIhelper where
 import Data.Word
 
 import Data.Int
-
 import Prelude -- Add prelude
 import Foreign.C.String(CString)
 #if (__GLASGOW_HASKELL__ >= 704)
@@ -27,7 +26,7 @@ import GHC.Generics(Generic)
 import Data.Function(on)
 
 data RoundMode = Near | Zero | Up | Down | MPFR_RNDNA
-                 deriving (Generic, Typeable,Show, Read)
+                 deriving (Typeable,Show, Read)
 
 instance Enum RoundMode where
 #if MPFR_VERSION_MAJOR == 2
