@@ -86,12 +86,12 @@ common common-options
         TypeOperators
         ViewPatterns
 
-    -- TemplateHaskell is used to support convenience functions such as
-    -- 'listToVecTH' and 'bLit'.
+        -- TemplateHaskell is used to support convenience functions such as
+        -- 'listToVecTH' and 'bLit'.
         TemplateHaskell
         QuasiQuotes
 
-    -- Prelude isn't imported by default as Clash offers Clash.Prelude
+        -- Prelude isn't imported by default as Clash offers Clash.Prelude
         NoImplicitPrelude
   ghc-options:
     -j16
