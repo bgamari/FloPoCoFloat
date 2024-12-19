@@ -198,9 +198,7 @@ library
 
     -- Base language which the package is written in.
     default-language: Haskell2010
-    
-    include-dirs:        C:\ghcup\msys64\clang64\include 
-    extra-lib-dirs:      C:\ghcup\msys64\clang64\lib 
+
     extra-libraries:     mpfr gmp
 
 executable clash
